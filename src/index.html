@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Event to iCal Converter</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.10/htmx.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        textarea,
+        input[type="file"] {
+            width: 100%;
+            margin-bottom: 10px;
+        }
+
+        button {
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+
+        #result {
+            margin-top: 20px;
+            white-space: pre-wrap;
+            background-color: #f0f0f0;
+            padding: 10px;
+        }
+
+        #downloadBtn {
+            display: none;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Event to iCal Converter</h1>
+
+    <h2>Text Input</h2>
+    <form hx-post="/text" hx-target="#result">
+        <textarea name="text" rows="4" placeholder="Enter event details or URL"></textarea>
+        <button type="submit">Convert Text</button>
+    </form>
+
+    <h2>Image Input</h2>
+    <form hx-post="/image" hx-target="#result" hx-encoding="multipart/form-data">
+        <input type="file" name="image" accept="image/*">
+        <button type="submit">Convert Image</button>
+    </form>
+
+    <div id="result"></div>
+    <button id="downloadBtn">Download iCal File</button>
+
+    <script>
+        document.body.addEventListener('htmx:afterSettle', function (evt) {
+            const result = document.getElementById('result');
+            const downloadBtn = document.getElementById('downloadBtn');
+            if (result.textContent.trim().startsWith('BEGIN:VCALENDAR')) {
+                downloadBtn.style.display = 'block';
+            } else {
+                downloadBtn.style.display = 'none';
+            }
+        });
+
+        document.getElementById('downloadBtn').addEventListener('click', function () {
+            const result = document.getElementById('result');
+            const blob = new Blob([result.textContent], { type: 'text/calendar' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'event.ics';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+    </script>
+</body>
+
+</html>
