@@ -4,3 +4,5 @@
 image input. AI™®-backed, so use with caution.
 
 Put together very quickly.
+
+Chromedriver in Docker Compose is currently broken.
