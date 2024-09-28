@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 
+<!-- The below heap of unholy junk is LLM generated. -->
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -29,59 +31,92 @@
         }
 
         #result {
-            margin-top: 20px;
-            white-space: pre-wrap;
-            background-color: #f0f0f0;
-            padding: 10px;
+            display: none;
         }
 
         #downloadBtn {
-            display: none;
             margin-top: 10px;
+            background-color: #ccc;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        #downloadBtn.active {
+            background-color: #4CAF50;
+            color: white;
+            cursor: pointer;
+        }
+
+        @keyframes pulse {
+            0% {
+                transform: scale(1);
+            }
+
+            50% {
+                transform: scale(1.05);
+            }
+
+            100% {
+                transform: scale(1);
+            }
+        }
+
+        .loading {
+            animation: pulse 1s infinite;
         }
     </style>
 </head>
 
 <body>
     <h1>Event to iCal Converter</h1>
-
     <h2>Text Input</h2>
-    <form hx-post="/text" hx-target="#result">
+    <form hx-post="/text" hx-target="#result" hx-indicator="#downloadBtn">
         <textarea name="text" rows="4" placeholder="Enter event details or URL"></textarea>
         <button type="submit">Convert Text</button>
     </form>
-
     <h2>Image Input</h2>
-    <form hx-post="/image" hx-target="#result" hx-encoding="multipart/form-data">
+    <form hx-post="/image" hx-target="#result" hx-encoding="multipart/form-data" hx-indicator="#downloadBtn">
         <input type="file" name="image" accept="image/*">
         <button type="submit">Convert Image</button>
     </form>
-
     <div id="result"></div>
-    <button id="downloadBtn">Download iCal File</button>
-
+    <button id="downloadBtn" disabled>Download iCal File</button>
     <script>
+        document.body.addEventListener('htmx:beforeRequest', function (evt) {
+            const downloadBtn = document.getElementById('downloadBtn');
+            downloadBtn.classList.add('loading');
+            downloadBtn.textContent = 'Converting...';
+            downloadBtn.disabled = true;
+        });
+
         document.body.addEventListener('htmx:afterSettle', function (evt) {
             const result = document.getElementById('result');
             const downloadBtn = document.getElementById('downloadBtn');
+            downloadBtn.classList.remove('loading');
             if (result.textContent.trim().startsWith('BEGIN:VCALENDAR')) {
-                downloadBtn.style.display = 'block';
+                downloadBtn.classList.add('active');
+                downloadBtn.disabled = false;
+                downloadBtn.textContent = 'Download iCal File';
             } else {
-                downloadBtn.style.display = 'none';
+                downloadBtn.classList.remove('active');
+                downloadBtn.disabled = true;
+                downloadBtn.textContent = 'Download iCal File';
             }
         });
 
         document.getElementById('downloadBtn').addEventListener('click', function () {
-            const result = document.getElementById('result');
-            const blob = new Blob([result.textContent], { type: 'text/calendar' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'event.ics';
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            if (!this.disabled) {
+                const result = document.getElementById('result');
+                const blob = new Blob([result.textContent], { type: 'text/calendar' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'event.ics';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            }
         });
     </script>
 </body>
