@@ -27,6 +27,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "aiCalamba"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "base64",
+ "env_logger",
+ "log",
+ "openai-api-rs",
+ "serde",
+ "thirtyfour",
+ "tokio",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "anstream"
 version = "0.6.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -158,22 +174,6 @@ dependencies = [
  "tower-layer",
  "tower-service",
  "tracing",
-]
-
-[[package]]
-name = "ay-calamba"
-version = "0.1.0"
-dependencies = [
- "axum",
- "base64",
- "env_logger",
- "log",
- "openai-api-rs",
- "serde",
- "thirtyfour",
- "tokio",
- "tracing-subscriber",
- "url",
 ]
 
 [[package]]
