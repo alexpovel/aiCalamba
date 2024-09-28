@@ -110,7 +110,9 @@ impl Display for LlmInput {
 async fn fetch_llm_hallucinations(input: LlmInput) -> Result<String, Box<dyn Error + Send + Sync>> {
     debug!("Will fetch LLM hallucinations for input: {input}");
 
-    let now = chrono::Utc::now();
+    let now = chrono::Utc::now().format("%Y-%m-%d");
+
+    let common_prompt = format!("Extract the information and format it in text format according to the iCal specification. Return nothing but that text. If date info is missing, such as the current year, month or day, fill it in from the current date, which is {now}. If no wall clock time is mentioned, make it an all-day event. Assume event times are in Europe/Berlin aka CEST timezone. Pay attention to events spanning multiple days, and recurring events. If only a start time is mentioned but no end time, assume one hour duration.");
 
     let client = OpenAIClient::new(env::var("OPENAI_KEY")?);
     let content = match input {
@@ -119,7 +121,7 @@ async fn fetch_llm_hallucinations(input: LlmInput) -> Result<String, Box<dyn Err
                 [
                     ImageUrl {
                         r#type: chat_completion::ContentType::text,
-                        text: Some(format!("The following is a picture containing information for an event. Extract the information and format it in text format according to the iCal specification. If parts are missing, such as the current year or month, fill it out from the current timestamp, which is {now}. Return nothing but that text. The image is shown below.")),
+                        text: Some(format!("The following is a picture containing information for an event. {common_prompt}\nThe image is shown below.")),
                         image_url: None,
                     },
                     ImageUrl {
@@ -132,7 +134,7 @@ async fn fetch_llm_hallucinations(input: LlmInput) -> Result<String, Box<dyn Err
                 ],
             ))
         },
-        LlmInput::Text(text) => chat_completion::Content::Text(format!("The following is the textual description of an event. Extract the information and format it in text format according to the iCal specification. Return nothing but that text. If parts are missing, such as the current year or month, fill it out from the current timestamp, which is {now}. The text is:\n\n{text}")),
+        LlmInput::Text(text) => chat_completion::Content::Text(format!("The following is the textual description of an event. {common_prompt}\nThe text is:\n\n{text}")),
     };
 
     let req = ChatCompletionRequest::new(
