@@ -6,8 +6,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Event to iCal Converter</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.10/htmx.min.js"></script>
+    <title>aiCalamba</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/2.0.2/htmx.min.js"></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -68,10 +68,13 @@
 </head>
 
 <body>
-    <h1>Event to iCal Converter</h1>
+    <h1>aiCalamba</h1>
+    <p>Enter text, pass a URL or upload an image, and aiCalamba will convert the contents to an event file for import
+        into your calendar.</p>
     <h2>Text Input</h2>
     <form hx-post="/text" hx-target="#result" hx-indicator="#downloadBtn">
-        <textarea name="text" rows="4" placeholder="Enter event details or URL"></textarea>
+        <textarea name="text" rows="4"
+            placeholder="Enter event details or URL. If a URL is passed, it will be visited and its contents converted."></textarea>
         <button type="submit">Convert Text</button>
     </form>
     <h2>Image Input</h2>

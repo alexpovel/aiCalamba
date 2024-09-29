@@ -1,5 +1,5 @@
 use axum::{
-    extract::{DefaultBodyLimit, Multipart},
+    extract::{DefaultBodyLimit, Multipart, State},
     response::{Html, IntoResponse},
     routing::{get, post},
     Form, Router,
@@ -12,8 +12,8 @@ use openai_api_rs::v1::{
     common::GPT4_O,
 };
 use serde::Deserialize;
-use std::{env, error::Error, fmt::Display};
-use thirtyfour::prelude::*;
+use std::{env, error::Error, fmt::Display, sync::Arc};
+use tokio::sync::RwLock;
 use url::Url;
 
 #[derive(Deserialize, Debug)]
@@ -36,14 +36,19 @@ fn internal_error(e: WhateverError) -> impl IntoResponse {
     )
 }
 
-async fn handle_text(Form(payload): Form<TextRequest>) -> impl IntoResponse {
+async fn handle_text(
+    State(state): State<Arc<AppState>>,
+    Form(payload): Form<TextRequest>,
+) -> impl IntoResponse {
     debug!("Handling text input: {payload:?}");
 
-    match Url::parse(&payload.text) {
+    let text = payload.text.trim();
+
+    match Url::parse(text) {
         Ok(url) => {
             debug!("Text input is URL: {url}");
 
-            match process_url(&url).await {
+            match process_url(&url, state).await {
                 Ok(ics) => ics.into_response(),
                 Err(e) => internal_error(e).into_response(),
             }
@@ -51,7 +56,7 @@ async fn handle_text(Form(payload): Form<TextRequest>) -> impl IntoResponse {
         Err(_) => {
             debug!("Text input is raw text.");
 
-            match process_text(payload.text).await {
+            match process_text(text).await {
                 Ok(ics) => ics.into_response(),
                 Err(e) => internal_error(e).into_response(),
             }
@@ -60,59 +65,83 @@ async fn handle_text(Form(payload): Form<TextRequest>) -> impl IntoResponse {
 }
 
 async fn handle_image(mut multipart: Multipart) -> impl IntoResponse {
-    if let Some(field) = multipart.next_field().await.unwrap() {
-        let data = field.bytes().await.unwrap();
-        let base64_image = BASE64_STANDARD.encode(data);
-
-        match fetch_llm_hallucinations(LlmInput::Image(base64_image)).await {
-            Ok(ics) => ics.into_response(),
-            Err(e) => internal_error(e).into_response(),
+    match multipart.next_field().await {
+        Ok(Some(field)) => match field.bytes().await {
+            Ok(img) => match fetch_llm_hallucinations(LlmInput::Image(&img)).await {
+                Ok(ics) => ics.into_response(),
+                Err(e) => internal_error(e).into_response(),
+            },
+            Err(e) => {
+                error!("Failed to read image file: {e}");
+                (
+                    axum::http::StatusCode::BAD_REQUEST,
+                    "Failed to read image file".to_string(),
+                )
+                    .into_response()
+            }
+        },
+        Ok(None) => {
+            error!("Failed to read image file");
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                "Failed to read image file".to_string(),
+            )
+                .into_response()
         }
-    } else {
-        (
-            axum::http::StatusCode::BAD_REQUEST,
-            "No image file found".to_string(),
-        )
-            .into_response()
+        Err(e) => {
+            error!("Failed to read image file: {e}");
+            (
+                axum::http::StatusCode::BAD_REQUEST,
+                "Failed to read image file".to_string(),
+            )
+                .into_response()
+        }
     }
 }
 
-async fn process_text(text: String) -> Result<String, Box<dyn Error + Send + Sync>> {
+async fn process_text(text: &str) -> Result<String, WhateverError> {
     fetch_llm_hallucinations(LlmInput::Text(text)).await
 }
 
-async fn process_url(url: &Url) -> Result<String, Box<dyn Error + Send + Sync>> {
-    let base64img = fetch_screenshot(url).await?;
-
-    let content = fetch_llm_hallucinations(LlmInput::Image(base64img)).await?;
-
+async fn process_url(url: &Url, state: Arc<AppState>) -> Result<String, WhateverError> {
+    let img = fetch_screenshot(url).await?;
+    *state.last_image.write().await = Some(img.clone());
+    let content = fetch_llm_hallucinations(LlmInput::Image(&img)).await?;
     Ok(content)
 }
 
 #[derive(Debug)]
-enum LlmInput {
-    /// Base64-encoded image text.
-    Image(String),
+enum LlmInput<'a> {
+    /// Image.
+    Image(&'a [u8]),
     /// Raw text.
-    Text(String),
+    Text(&'a str),
 }
 
-impl Display for LlmInput {
+impl Display for LlmInput<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            LlmInput::Image(i) => write!(f, "Image({:.20})", i.escape_debug()),
+            LlmInput::Image(i) => write!(f, "Image({:?})", i.get(..20)),
             LlmInput::Text(t) => write!(f, "Text({})", t.escape_debug()),
         }
     }
 }
 
 /// Visits LLM API and fetches model response.
-async fn fetch_llm_hallucinations(input: LlmInput) -> Result<String, Box<dyn Error + Send + Sync>> {
+async fn fetch_llm_hallucinations(input: LlmInput<'_>) -> Result<String, WhateverError> {
     debug!("Will fetch LLM hallucinations for input: {input}");
 
     let now = chrono::Utc::now().format("%Y-%m-%d");
 
-    let common_prompt = format!("Extract the information and format it in text format according to the iCal specification. Return nothing but that text. If date info is missing, such as the current year, month or day, fill it in from the current date, which is {now}. If no wall clock time is mentioned, make it an all-day event. Assume event times are in Europe/Berlin aka CEST timezone. Pay attention to events spanning multiple days, and recurring events. If only a start time is mentioned but no end time, assume one hour duration.");
+    let common_prompt = format!(
+        r"Extract the information and format it in text format according to the iCal specification.
+Return nothing but that text.
+If date info is missing, such as the current year, month or day, fill it in from the current date, which is {now}.
+If no wall clock time is mentioned, make it an all-day event.
+Assume event times are in Europe/Berlin aka CEST timezone.
+Pay attention to events spanning multiple days, and recurring events.
+If only a start time is mentioned but no end time, assume one hour duration."
+    );
 
     let client = OpenAIClient::new(env::var("OPENAI_KEY")?);
     let content = match input {
@@ -128,7 +157,7 @@ async fn fetch_llm_hallucinations(input: LlmInput) -> Result<String, Box<dyn Err
                         r#type: chat_completion::ContentType::image_url,
                         text: None,
                         image_url: Some(chat_completion::ImageUrlType {
-                            url: format!("data:image/jpeg;base64,{img}"),
+                            url: format!("data:image/jpeg;base64,{}", BASE64_STANDARD.encode(img)),
                         }),
                     },
                 ],
@@ -157,33 +186,68 @@ async fn fetch_llm_hallucinations(input: LlmInput) -> Result<String, Box<dyn Err
         .ok_or("No LLM response")?;
 
     debug!("LLM hallucinations: {}", content.escape_debug());
+
+    // Sanity check
+    if let Err(e) = icalendar::parser::read_calendar(&content) {
+        // Log...
+        error!("Failed to parse iCal content: {e}");
+        // ... and send it out anyway. Clients might tolerate it.
+    } else {
+        debug!("Parsed iCal content successfully");
+    }
+
     Ok(content)
 }
 
-async fn fetch_screenshot(url: &Url) -> Result<String, WhateverError> {
+async fn fetch_screenshot(url: &Url) -> Result<Vec<u8>, WhateverError> {
     debug!("Will fetch screenshot for URL: {url}");
 
-    let mut caps = DesiredCapabilities::chrome();
-    caps.add_arg("--headless=new")?;
-    let driver = WebDriver::new(
-        env::var("CHROME_DRIVER_URL").unwrap_or("http://localhost:9123".into()),
-        caps,
-    )
-    .await?;
-    debug!("Driver created");
-    driver.goto(url.as_str()).await?;
+    // https://apiflash.com/documentation
+    let params = [
+        ("access_key", env::var("APIFLASH_KEY")?),
+        ("url", url.to_string()),
+        // Some pages are really slow. We're not in a rush, make sure results are correct.
+        ("delay", "10".to_string()),
+    ];
 
-    // Wait
-    let element = driver.find(By::Css("body")).await?;
-    element.wait_until().displayed().await?;
-    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-    debug!("Site loaded");
+    let client = reqwest::Client::new();
+    let request = client
+        .request(
+            reqwest::Method::GET,
+            "https://api.apiflash.com/v1/urltoimage",
+        )
+        .query(&params)
+        .build()?;
+    debug!("Request: {request:?}");
 
-    let base64img = driver.screenshot_as_png_base64().await?;
-    driver.quit().await?;
-    debug!("Screenshot taken");
+    let response = client.execute(request).await?;
+    debug!("Response: {response:?}");
 
-    Ok(base64img)
+    let bytes = response.bytes().await?;
+    // Sanity check
+    let mut decoder = jpeg_decoder::Decoder::new(bytes.as_ref());
+    decoder.decode()?;
+    debug!("Image size: {} bytes", bytes.len());
+
+    Ok(bytes.into())
+}
+
+async fn serve_last_image(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.last_image.read().await.as_ref() {
+        Some(img) => axum::response::Response::builder()
+            .header("Content-Type", "image/jpeg")
+            .body(axum::body::Body::from(img.clone()))
+            .unwrap(),
+        None => (
+            axum::http::StatusCode::NOT_FOUND,
+            "No image available".to_string(),
+        )
+            .into_response(),
+    }
+}
+
+struct AppState {
+    last_image: RwLock<Option<Vec<u8>>>,
 }
 
 #[tokio::main]
@@ -194,12 +258,18 @@ async fn main() {
 
     info!("Starting server");
 
+    let state = Arc::new(AppState {
+        last_image: RwLock::new(None),
+    });
+
     let app = Router::new()
         .route("/", get(index))
         .route("/text", post(handle_text))
         .route("/image", post(handle_image))
+        .route("/image/last", get(serve_last_image)) // For debugging
         // Need to handle images larger than 2 MB (axum default)
-        .layer(DefaultBodyLimit::max(10_000_000));
+        .layer(DefaultBodyLimit::max(10_000_000))
+        .with_state(state);
 
     info!("App built: {app:?}");
 
