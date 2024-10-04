@@ -150,7 +150,7 @@ If only a start time is mentioned but no end time, assume one hour duration."
                 [
                     ImageUrl {
                         r#type: chat_completion::ContentType::text,
-                        text: Some(format!("The following is a picture containing information for an event. {common_prompt}\nThe image is shown below.")),
+                        text: Some(format!("The following is a picture containing information for one or more events. {common_prompt}\nThe image is shown below.")),
                         image_url: None,
                     },
                     ImageUrl {
@@ -163,7 +163,7 @@ If only a start time is mentioned but no end time, assume one hour duration."
                 ],
             ))
         },
-        LlmInput::Text(text) => chat_completion::Content::Text(format!("The following is the textual description of an event. {common_prompt}\nThe text is:\n\n{text}")),
+        LlmInput::Text(text) => chat_completion::Content::Text(format!("The following is the textual description of one or more events. {common_prompt}\nThe text is:\n\n{text}")),
     };
 
     let req = ChatCompletionRequest::new(
