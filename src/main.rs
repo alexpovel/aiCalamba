@@ -186,6 +186,8 @@ If only a start time is mentioned but no end time, assume one hour duration."
         .ok_or("No LLM response")?;
 
     debug!("LLM hallucinations: {}", content.escape_debug());
+    let content = clean(&content);
+    debug!("Cleaned LLM hallucinations: {}", content.escape_debug());
 
     // Sanity check
     if let Err(e) = icalendar::parser::read_calendar(&content) {
@@ -197,6 +199,14 @@ If only a start time is mentioned but no end time, assume one hour duration."
     }
 
     Ok(content)
+}
+
+fn clean(string: &str) -> String {
+    string
+        .trim()
+        // Might be in a code block
+        .trim_matches('`')
+        .into()
 }
 
 async fn fetch_screenshot(url: &Url) -> Result<Vec<u8>, WhateverError> {
